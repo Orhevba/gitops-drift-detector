@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: drift-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitops-drift-detector
+  namespace: drift-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitops-drift-detector
+  template:
+    metadata:
+      labels:
+        app: gitops-drift-detector
+    spec:
+      serviceAccountName: gitops-drift-detector
+      containers:
+        - name: manager
+          # Built from the repo's Dockerfile. On a single-node k3s VM with
+          # no registry, the simplest path is building the image directly
+          # on that VM (or importing a tarball via `k3s ctr images import`)
+          # rather than pushing/pulling through a registry.
+          image: gitops-drift-detector:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --metrics-bind-address=:8080

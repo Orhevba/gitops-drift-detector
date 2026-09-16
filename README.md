@@ -1,7 +1,7 @@
 # gitops-drift-detector
 
-Compares a directory of Kubernetes manifests (your Git source of truth)
-against what's actually running in a cluster, and reports drift:
+Compares Kubernetes manifests (your Git source of truth) against what's
+actually running in a cluster, and reports drift:
 
 - `MISSING` — declared in Git, not deployed
 - `DRIFTED` — deployed, but fields differ from Git
@@ -11,17 +11,28 @@ against what's actually running in a cluster, and reports drift:
 Only compares fields that are present in the Git manifest — fields the
 cluster/API server adds on its own (status, defaults, etc.) are ignored.
 
+There are two ways to run it:
+
+- **`cmd/check`** — a one-shot CLI. Point it at a local manifests directory
+  and a kubeconfig, get a report, done.
+- **`cmd/manager`** — an in-cluster controller. Define a `WatchedRepo`
+  custom resource (Git repo URL + path + target namespace), and it
+  continuously clones, checks, and writes the result to that resource's
+  `.status`, on a schedule.
+
+Both share the same comparison logic in `internal/drift`.
+
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.22+
 - A kubeconfig pointing at your cluster (e.g. k3s: usually
   `/etc/rancher/k3s/k3s.yaml`, or copy it to `~/.kube/config`)
 
-## Usage
+## CLI usage (`cmd/check`)
 
 ```sh
 go mod tidy
-go run . -manifests ./examples/manifests -namespace default
+go run ./cmd/check -manifests ./examples/manifests -namespace default
 ```
 
 Point `-manifests` at your own repo of YAML files once you've verified it
@@ -33,17 +44,58 @@ Kubernetes adds to every namespace itself) are excluded from orphan
 detection by default. Add your own exceptions with `-ignore`:
 
 ```sh
-go run . -manifests ./examples/manifests -namespace default \
+go run ./cmd/check -manifests ./examples/manifests -namespace default \
   -ignore "Secret/some-webhook-cert,ConfigMap/some-operator-cache"
 ```
 
 Exit code is `1` if any drift was found, `0` if everything is in sync —
-so it can be wired into CI later.
+so it can be wired into CI.
+
+## Running as a controller (`cmd/manager`)
+
+This is the "real operator" version: instead of you running a command, it
+runs inside the cluster and reconciles `WatchedRepo` resources on a loop.
+
+1. **Install the CRD and RBAC:**
+   ```sh
+   kubectl apply -f config/crd/watchedrepo-crd.yaml
+   kubectl apply -f config/rbac/rbac.yaml
+   ```
+
+2. **Build the image.** On a single-node k3s VM with no registry, the
+   simplest path is building directly on that VM (copy the repo over, or
+   `git clone` it there):
+   ```sh
+   docker build -t gitops-drift-detector:latest .
+   ```
+   If you're building elsewhere and need to get the image onto the k3s
+   node, save and import it instead of pushing to a registry:
+   ```sh
+   docker save gitops-drift-detector:latest | ssh <vm> 'sudo k3s ctr images import -'
+   ```
+
+3. **Deploy the manager:**
+   ```sh
+   kubectl apply -f config/manager/deployment.yaml
+   ```
+
+4. **Create a `WatchedRepo`** (see `config/samples/watchedrepo-sample.yaml`
+   for the shape) pointing at a real Git repo, then watch it get checked:
+   ```sh
+   kubectl apply -f config/samples/watchedrepo-sample.yaml
+   kubectl get watchedrepos -A -w
+   kubectl get watchedrepo demo -n drift-system -o yaml   # full status, including per-resource drift
+   ```
+
+RBAC note: the manager is granted broad cluster-wide read access (`get`/
+`list`/`watch` on `*`/`*`), because a `WatchedRepo` can reference any
+resource kind — the checker can't know ahead of time what to scope down
+to. Fine for a personal cluster; tighten `config/rbac/rbac.yaml` to
+specific apiGroups/resources before running this anywhere that matters.
 
 ## Roadmap
 
+- [x] Rebuild as a controller (`controller-runtime` + CRD)
 - [ ] Support Kustomize overlays, not just plain YAML
-- [ ] Run on a schedule (K8s CronJob) instead of manually
 - [ ] Slack/webhook alert on drift
-- [ ] Rebuild as a proper controller (`controller-runtime` + CRD) with
-      optional auto-remediation
+- [ ] Optional auto-remediation (apply Git's version to fix drift automatically)

@@ -1,0 +1,83 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: watchedrepos.drift.tygacookie.dev
+spec:
+  group: drift.tygacookie.dev
+  names:
+    kind: WatchedRepo
+    listKind: WatchedRepoList
+    plural: watchedrepos
+    singular: watchedrepo
+    shortNames:
+      - wr
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: In Sync
+          type: boolean
+          jsonPath: .status.inSync
+        - name: Drift
+          type: integer
+          jsonPath: .status.driftCount
+        - name: Last Checked
+          type: string
+          jsonPath: .status.lastChecked
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [repoURL, path, namespace]
+              properties:
+                repoURL:
+                  type: string
+                  description: Git repository to clone, e.g. https://github.com/org/repo.git
+                branch:
+                  type: string
+                  description: Branch to check out. Defaults to the repo's default branch.
+                path:
+                  type: string
+                  description: Path within the repo to the directory of YAML manifests.
+                namespace:
+                  type: string
+                  description: Namespace in the cluster to compare the manifests against.
+                pollInterval:
+                  type: string
+                  description: Duration between checks, e.g. "5m". Defaults to 5m.
+                ignore:
+                  type: array
+                  description: "Kind/name entries excluded from orphan detection."
+                  items:
+                    type: string
+            status:
+              type: object
+              properties:
+                lastChecked:
+                  type: string
+                  format: date-time
+                inSync:
+                  type: boolean
+                driftCount:
+                  type: integer
+                error:
+                  type: string
+                drift:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                      status:
+                        type: string
+                      detail:
+                        type: string

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitops-drift-detector
+  namespace: drift-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gitops-drift-detector
+rules:
+  - apiGroups: ["drift.tygacookie.dev"]
+    resources: ["watchedrepos"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["drift.tygacookie.dev"]
+    resources: ["watchedrepos/status"]
+    verbs: ["get", "update", "patch"]
+  # Broad read access is required because a WatchedRepo can reference any
+  # resource kind that shows up in its manifests — the checker can't know
+  # ahead of time which apiGroups/kinds to scope down to. Fine for a
+  # personal/portfolio cluster; tighten this to specific apiGroups/resources
+  # before running it anywhere that matters.
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gitops-drift-detector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gitops-drift-detector
+subjects:
+  - kind: ServiceAccount
+    name: gitops-drift-detector
+    namespace: drift-system

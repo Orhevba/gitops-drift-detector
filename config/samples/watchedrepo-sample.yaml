@@ -1,0 +1,11 @@
+apiVersion: drift.tygacookie.dev/v1alpha1
+kind: WatchedRepo
+metadata:
+  name: demo
+  namespace: drift-system
+spec:
+  repoURL: https://github.com/tygacookie/gitops-drift-detector.git
+  branch: master
+  path: examples/manifests
+  namespace: default
+  pollInterval: 5m

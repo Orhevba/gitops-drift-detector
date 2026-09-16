@@ -1,12 +1,12 @@
-// gitops-drift-detector compares a directory of Kubernetes manifests (the
-// "desired state" from Git) against what is actually running in a cluster,
-// and reports any drift.
-package main
+// Package drift contains the core comparison logic shared by the CLI
+// (cmd/check) and the in-cluster controller (internal/controller): given a
+// directory of manifests and a target namespace, work out what's missing,
+// drifted, or orphaned relative to a live cluster.
+package drift
 
 import (
 	"bufio"
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,164 +22,177 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
-	"k8s.io/client-go/tools/clientcmd"
 	sigsyaml "sigs.k8s.io/yaml"
 )
 
+type Status string
+
 const (
-	colorReset  = "\033[0m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
+	StatusInSync  Status = "IN SYNC"
+	StatusMissing Status = "MISSING"
+	StatusDrifted Status = "DRIFTED"
+	StatusOrphan  Status = "ORPHAN"
+	StatusError   Status = "ERROR"
+	StatusSkip    Status = "SKIP"
 )
+
+// Entry describes the result of checking one resource.
+type Entry struct {
+	Kind   string
+	Name   string
+	Status Status
+	// Detail holds field-level diff info for StatusDrifted, or an error
+	// message for StatusError/StatusSkip. Empty otherwise.
+	Detail string
+}
+
+type Result struct {
+	Entries []Entry
+}
+
+// HasDrift reports whether anything in the result needs attention.
+func (r Result) HasDrift() bool {
+	for _, e := range r.Entries {
+		if e.Status != StatusInSync {
+			return true
+		}
+	}
+	return false
+}
 
 // defaultIgnoredOrphans lists resources Kubernetes itself injects into every
 // namespace. Nobody puts these in Git, so they'd otherwise show up as a
-// false-positive orphan in every single run.
+// false-positive orphan on every single check.
 var defaultIgnoredOrphans = map[string]bool{
 	"ConfigMap/kube-root-ca.crt": true,
 }
 
-func main() {
-	manifestsDir := flag.String("manifests", "", "directory of YAML manifests (the desired state)")
-	namespace := flag.String("namespace", "", "namespace to check against")
-	kubeconfig := flag.String("kubeconfig", "", "path to kubeconfig (defaults to KUBECONFIG env or ~/.kube/config)")
-	ignoreFlag := flag.String("ignore", "", "comma-separated Kind/name entries to exclude from orphan detection, e.g. \"Secret/some-webhook-cert\"")
-	flag.Parse()
+// Check compares the manifests in manifestsDir against live state in
+// namespace, using cfg to talk to the cluster. extraIgnore entries are
+// "Kind/name" strings excluded from orphan detection in addition to the
+// built-in defaults.
+func Check(ctx context.Context, cfg *rest.Config, manifestsDir, namespace string, extraIgnore []string) (Result, error) {
+	var result Result
 
-	ignoredOrphans := map[string]bool{}
+	ignored := map[string]bool{}
 	for k := range defaultIgnoredOrphans {
-		ignoredOrphans[k] = true
+		ignored[k] = true
 	}
-	for _, entry := range strings.Split(*ignoreFlag, ",") {
+	for _, entry := range extraIgnore {
 		entry = strings.TrimSpace(entry)
 		if entry != "" {
-			ignoredOrphans[entry] = true
+			ignored[entry] = true
 		}
 	}
 
-	if *manifestsDir == "" || *namespace == "" {
-		fmt.Fprintln(os.Stderr, "usage: gitops-drift-detector -manifests <dir> -namespace <ns> [-kubeconfig <path>]")
-		os.Exit(2)
-	}
-
-	desired, err := loadManifests(*manifestsDir)
+	desired, err := loadManifests(manifestsDir)
 	if err != nil {
-		fatal("failed to load manifests: %v", err)
+		return result, fmt.Errorf("failed to load manifests: %w", err)
 	}
 	if len(desired) == 0 {
-		fatal("no manifests found in %s", *manifestsDir)
+		return result, fmt.Errorf("no manifests found in %s", manifestsDir)
 	}
 
-	config, err := buildKubeConfig(*kubeconfig)
+	dynClient, err := dynamic.NewForConfig(cfg)
 	if err != nil {
-		fatal("failed to load kube config: %v", err)
+		return result, fmt.Errorf("failed to build dynamic client: %w", err)
 	}
-
-	dynClient, err := dynamic.NewForConfig(config)
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
 	if err != nil {
-		fatal("failed to build dynamic client: %v", err)
-	}
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		fatal("failed to build discovery client: %v", err)
+		return result, fmt.Errorf("failed to build discovery client: %w", err)
 	}
 	groupResources, err := restmapper.GetAPIGroupResources(discoveryClient)
 	if err != nil {
-		fatal("failed to fetch API resources: %v", err)
+		return result, fmt.Errorf("failed to fetch API resources: %w", err)
 	}
 	mapper := restmapper.NewDiscoveryRESTMapper(groupResources)
 
-	driftFound := false
 	seenByKind := map[schema.GroupVersionKind]map[string]bool{}
 
 	for _, obj := range desired {
 		gvk := obj.GroupVersionKind()
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
-			fmt.Printf("%s[SKIP]%s %s: no REST mapping found (%v)\n", colorYellow, colorReset, describe(obj), err)
+			result.Entries = append(result.Entries, Entry{
+				Kind: gvk.Kind, Name: obj.GetName(), Status: StatusSkip,
+				Detail: fmt.Sprintf("no REST mapping found: %v", err),
+			})
 			continue
 		}
 
-		var ri dynamic.ResourceInterface
-		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-			ri = dynClient.Resource(mapping.Resource).Namespace(*namespace)
-		} else {
-			ri = dynClient.Resource(mapping.Resource)
-		}
+		ri := resourceInterface(dynClient, mapping, namespace)
 
 		if seenByKind[gvk] == nil {
 			seenByKind[gvk] = map[string]bool{}
 		}
 		seenByKind[gvk][obj.GetName()] = true
 
-		live, err := ri.Get(context.Background(), obj.GetName(), metav1.GetOptions{})
+		live, err := ri.Get(ctx, obj.GetName(), metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
-			fmt.Printf("%s[MISSING]%s %s is in Git but not deployed\n", colorRed, colorReset, describe(obj))
-			driftFound = true
+			result.Entries = append(result.Entries, Entry{
+				Kind: gvk.Kind, Name: obj.GetName(), Status: StatusMissing,
+			})
 			continue
 		}
 		if err != nil {
-			fmt.Printf("%s[ERROR]%s %s: %v\n", colorYellow, colorReset, describe(obj), err)
+			result.Entries = append(result.Entries, Entry{
+				Kind: gvk.Kind, Name: obj.GetName(), Status: StatusError, Detail: err.Error(),
+			})
 			continue
 		}
 
 		diffs := diffDesiredVsLive(obj.Object, live.Object, "")
 		if len(diffs) == 0 {
-			fmt.Printf("%s[IN SYNC]%s %s\n", colorGreen, colorReset, describe(obj))
+			result.Entries = append(result.Entries, Entry{
+				Kind: gvk.Kind, Name: obj.GetName(), Status: StatusInSync,
+			})
 			continue
 		}
 
-		driftFound = true
-		fmt.Printf("%s[DRIFTED]%s %s\n", colorRed, colorReset, describe(obj))
-		for _, d := range diffs {
-			fmt.Printf("    %s: git=%v cluster=%v\n", d.path, d.desired, d.live)
+		var detail strings.Builder
+		for i, d := range diffs {
+			if i > 0 {
+				detail.WriteString("; ")
+			}
+			fmt.Fprintf(&detail, "%s: git=%v cluster=%v", d.path, d.desired, d.live)
 		}
+		result.Entries = append(result.Entries, Entry{
+			Kind: gvk.Kind, Name: obj.GetName(), Status: StatusDrifted, Detail: detail.String(),
+		})
 	}
 
-	// Orphan check: only for kinds we actually saw in the manifests dir,
-	// so we never need a hardcoded list of "interesting" resource types.
+	// Orphan check: only for kinds we actually saw in the manifests dir, so
+	// we never need a hardcoded list of "interesting" resource types.
 	for gvk, applied := range seenByKind {
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
 			continue
 		}
-		var ri dynamic.ResourceInterface
-		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-			ri = dynClient.Resource(mapping.Resource).Namespace(*namespace)
-		} else {
-			ri = dynClient.Resource(mapping.Resource)
-		}
-		list, err := ri.List(context.Background(), metav1.ListOptions{})
+		ri := resourceInterface(dynClient, mapping, namespace)
+
+		list, err := ri.List(ctx, metav1.ListOptions{})
 		if err != nil {
 			continue
 		}
 		for _, item := range list.Items {
 			key := fmt.Sprintf("%s/%s", gvk.Kind, item.GetName())
-			if ignoredOrphans[key] {
+			if ignored[key] || applied[item.GetName()] {
 				continue
 			}
-			if !applied[item.GetName()] {
-				driftFound = true
-				fmt.Printf("%s[ORPHAN]%s %s is in the cluster but not in Git\n",
-					colorRed, colorReset, key)
-			}
+			result.Entries = append(result.Entries, Entry{
+				Kind: gvk.Kind, Name: item.GetName(), Status: StatusOrphan,
+			})
 		}
 	}
 
-	if driftFound {
-		os.Exit(1)
-	}
-	fmt.Printf("%sno drift detected%s\n", colorGreen, colorReset)
+	return result, nil
 }
 
-func buildKubeConfig(explicitPath string) (*rest.Config, error) {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	if explicitPath != "" {
-		rules.ExplicitPath = explicitPath
+func resourceInterface(dynClient dynamic.Interface, mapping *meta.RESTMapping, namespace string) dynamic.ResourceInterface {
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		return dynClient.Resource(mapping.Resource).Namespace(namespace)
 	}
-	overrides := &clientcmd.ConfigOverrides{}
-	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides).ClientConfig()
+	return dynClient.Resource(mapping.Resource)
 }
 
 func loadManifests(dir string) ([]*unstructured.Unstructured, error) {
@@ -281,13 +294,4 @@ func isIgnoredField(prefix, key string) bool {
 		return true
 	}
 	return false
-}
-
-func describe(obj *unstructured.Unstructured) string {
-	return fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName())
-}
-
-func fatal(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	os.Exit(2)
 }
