@@ -4,7 +4,7 @@ metadata:
   name: demo
   namespace: drift-system
 spec:
-  repoURL: https://github.com/tygacookie/gitops-drift-detector.git
+  repoURL: https://github.com/Orhevba/gitops-drift-detector.git
   branch: master
   path: examples/manifests
   namespace: default
