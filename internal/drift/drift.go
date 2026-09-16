@@ -316,10 +316,40 @@ func diffDesiredVsLive(desired, live map[string]interface{}, prefix string) []fi
 				continue
 			}
 			diffs = append(diffs, diffDesiredVsLive(dvTyped, lvTyped, path)...)
+		case []interface{}:
+			lvTyped, ok := lv.([]interface{})
+			if !ok || len(dvTyped) != len(lvTyped) {
+				diffs = append(diffs, fieldDiff{path: path, desired: dv, live: lv})
+				continue
+			}
+			diffs = append(diffs, diffList(dvTyped, lvTyped, path)...)
 		default:
 			if fmt.Sprintf("%v", dv) != fmt.Sprintf("%v", lv) {
 				diffs = append(diffs, fieldDiff{path: path, desired: dv, live: lv})
 			}
+		}
+	}
+	return diffs
+}
+
+// diffList compares list elements index-by-index (Kubernetes doesn't
+// reorder list fields like containers/ports/volumes). Elements that are
+// themselves objects (e.g. containers) are diffed with the same
+// subset-of-desired-fields semantics as diffDesiredVsLive, so cluster-added
+// defaults inside list items (imagePullPolicy, resources, etc.) don't count
+// as drift either.
+func diffList(desired, live []interface{}, prefix string) []fieldDiff {
+	var diffs []fieldDiff
+	for i := range desired {
+		path := fmt.Sprintf("%s[%d]", prefix, i)
+		dMap, dIsMap := desired[i].(map[string]interface{})
+		lMap, lIsMap := live[i].(map[string]interface{})
+		if dIsMap && lIsMap {
+			diffs = append(diffs, diffDesiredVsLive(dMap, lMap, path)...)
+			continue
+		}
+		if fmt.Sprintf("%v", desired[i]) != fmt.Sprintf("%v", live[i]) {
+			diffs = append(diffs, fieldDiff{path: path, desired: desired[i], live: live[i]})
 		}
 	}
 	return diffs
