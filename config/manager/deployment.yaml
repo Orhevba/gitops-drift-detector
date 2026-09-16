@@ -29,3 +29,23 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - --metrics-bind-address=:8080
+          env:
+            # Created via:
+            #   kubectl create secret generic gitops-drift-detector-telegram \
+            #     -n drift-system \
+            #     --from-literal=token=<bot-token> \
+            #     --from-literal=chat-id=<chat-id>
+            # Notifications are disabled (a no-op) if this secret doesn't
+            # exist or the manager can't read it.
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gitops-drift-detector-telegram
+                  key: token
+                  optional: true
+            - name: TELEGRAM_CHAT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: gitops-drift-detector-telegram
+                  key: chat-id
+                  optional: true

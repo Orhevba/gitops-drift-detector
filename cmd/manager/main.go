@@ -15,6 +15,7 @@ import (
 
 	driftv1alpha1 "github.com/tygacookie/gitops-drift-detector/api/v1alpha1"
 	"github.com/tygacookie/gitops-drift-detector/internal/controller"
+	"github.com/tygacookie/gitops-drift-detector/internal/notify"
 )
 
 func main() {
@@ -40,9 +41,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	notifier := notify.FromEnv()
+	if _, ok := notifier.(notify.NoopNotifier); ok {
+		log.Info("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set, drift notifications are disabled")
+	}
+
 	if err := (&controller.WatchedRepoReconciler{
 		Client:     mgr.GetClient(),
 		RestConfig: cfg,
+		Notifier:   notifier,
 	}).SetupWithManager(mgr); err != nil {
 		log.Error(err, "unable to create controller")
 		os.Exit(1)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +21,7 @@ import (
 
 	driftv1alpha1 "github.com/tygacookie/gitops-drift-detector/api/v1alpha1"
 	"github.com/tygacookie/gitops-drift-detector/internal/drift"
+	"github.com/tygacookie/gitops-drift-detector/internal/notify"
 )
 
 const defaultPollInterval = 5 * time.Minute
@@ -28,6 +30,7 @@ const defaultPollInterval = 5 * time.Minute
 type WatchedRepoReconciler struct {
 	client.Client
 	RestConfig *rest.Config
+	Notifier   notify.Notifier
 }
 
 func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -59,6 +62,14 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.recordError(ctx, &wr, interval, err)
 	}
 
+	// Only notify on a change of state, not on every poll — otherwise a
+	// long-standing drift would re-alert every pollInterval forever. A
+	// LastChecked of zero means this is the resource's first ever check,
+	// which also shouldn't fire a notification (there's nothing to compare
+	// against yet).
+	isFirstCheck := wr.Status.LastChecked.IsZero()
+	wasInSync := wr.Status.InSync
+
 	wr.Status.LastChecked = metav1.Now()
 	wr.Status.Error = ""
 	wr.Status.InSync = !result.HasDrift()
@@ -78,7 +89,26 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	log.Info("checked WatchedRepo", "name", wr.Name, "inSync", wr.Status.InSync, "driftCount", wr.Status.DriftCount)
+
+	if !isFirstCheck && wr.Status.InSync != wasInSync {
+		if err := r.Notifier.Notify(ctx, driftMessage(&wr)); err != nil {
+			log.Error(err, "failed to send drift notification")
+		}
+	}
+
 	return ctrl.Result{RequeueAfter: interval}, nil
+}
+
+func driftMessage(wr *driftv1alpha1.WatchedRepo) string {
+	if wr.Status.InSync {
+		return fmt.Sprintf("✅ WatchedRepo %s/%s is back in sync.", wr.Namespace, wr.Name)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "⚠️ WatchedRepo %s/%s drifted (%d resource(s)):\n", wr.Namespace, wr.Name, wr.Status.DriftCount)
+	for _, d := range wr.Status.Drift {
+		fmt.Fprintf(&b, "- [%s] %s/%s\n", d.Status, d.Kind, d.Name)
+	}
+	return b.String()
 }
 
 func (r *WatchedRepoReconciler) recordError(ctx context.Context, wr *driftv1alpha1.WatchedRepo, interval time.Duration, checkErr error) (ctrl.Result, error) {

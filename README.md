@@ -98,9 +98,41 @@ resource kind — the checker can't know ahead of time what to scope down
 to. Fine for a personal cluster; tighten `config/rbac/rbac.yaml` to
 specific apiGroups/resources before running this anywhere that matters.
 
+## Drift notifications (Telegram)
+
+The manager sends a Telegram message whenever a `WatchedRepo` **changes**
+state (goes out of sync, or recovers) — not on every poll, so a
+long-standing drift doesn't re-alert every `pollInterval` forever.
+
+1. Message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot`,
+   follow the prompts, and copy the bot token it gives you.
+2. Send your new bot any message (in a DM, or add it to a group), then find
+   your chat ID:
+   ```sh
+   curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | grep -o '"chat":{"id":[0-9-]*'
+   ```
+3. Set both as environment variables. Locally (testing with `go run
+   ./cmd/manager`):
+   ```sh
+   export TELEGRAM_BOT_TOKEN=<token>
+   export TELEGRAM_CHAT_ID=<chat-id>
+   go run ./cmd/manager
+   ```
+   In-cluster, create a Secret instead (see `config/manager/deployment.yaml`
+   for the exact keys expected):
+   ```sh
+   kubectl create secret generic gitops-drift-detector-telegram \
+     -n drift-system \
+     --from-literal=token=<token> \
+     --from-literal=chat-id=<chat-id>
+   ```
+
+If neither variable is set, notifications are silently disabled (a no-op)
+— everything else still works.
+
 ## Roadmap
 
 - [x] Rebuild as a controller (`controller-runtime` + CRD)
 - [x] Support Kustomize overlays, not just plain YAML
-- [ ] Slack/webhook alert on drift
+- [x] Alert on drift (Telegram; Slack/other webhooks can reuse the same `notify.Notifier` interface)
 - [ ] Optional auto-remediation (apply Git's version to fix drift automatically)
