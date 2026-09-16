@@ -29,6 +29,18 @@ type WatchedRepoSpec struct {
 	// addition to well-known cluster-managed resources.
 	// +optional
 	Ignore []string `json:"ignore,omitempty"`
+
+	// AutoRemediate applies Git's version automatically to fix MISSING and
+	// DRIFTED resources (via server-side apply), instead of only reporting
+	// them. Off by default.
+	// +optional
+	AutoRemediate bool `json:"autoRemediate,omitempty"`
+
+	// PruneOrphans additionally deletes resources that are running in the
+	// cluster but not declared in Git. Has no effect unless AutoRemediate
+	// is also true. Off by default — this is destructive.
+	// +optional
+	PruneOrphans bool `json:"pruneOrphans,omitempty"`
 }
 
 // DriftEntry describes one resource that isn't in sync.

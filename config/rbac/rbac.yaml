@@ -20,9 +20,16 @@ rules:
   # ahead of time which apiGroups/kinds to scope down to. Fine for a
   # personal/portfolio cluster; tighten this to specific apiGroups/resources
   # before running it anywhere that matters.
+  #
+  # create/update/patch/delete are ONLY exercised when a WatchedRepo sets
+  # autoRemediate/pruneOrphans (both off by default) — but RBAC is granted
+  # at the ServiceAccount level, not per-CR, so having this ClusterRole
+  # bound at all means every WatchedRepo could self-escalate itself to
+  # remediate simply by being edited. There's no per-resource RBAC
+  # boundary here; this identity can write anything, cluster-wide.
   - apiGroups: ["*"]
     resources: ["*"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

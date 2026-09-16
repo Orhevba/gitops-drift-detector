@@ -62,6 +62,29 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.recordError(ctx, &wr, interval, err)
 	}
 
+	if wr.Spec.AutoRemediate && result.HasDrift() {
+		remediation, remErr := drift.Remediate(ctx, r.RestConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore,
+			drift.RemediateOptions{PruneOrphans: wr.Spec.PruneOrphans})
+		if remErr != nil {
+			log.Error(remErr, "remediation failed", "name", wr.Name)
+		} else {
+			log.Info("remediated WatchedRepo", "name", wr.Name,
+				"created", remediation.Created, "fixed", remediation.Fixed, "pruned", remediation.Pruned)
+			if remediation.HasErrors() {
+				log.Info("remediation had per-resource errors", "name", wr.Name, "errors", remediation.Errors)
+			}
+		}
+
+		// Re-check rather than assume remediation succeeded — a patch can
+		// be accepted by the API server without producing the expected
+		// result (e.g. an immutable field), so status should reflect
+		// reality, not intent.
+		result, err = drift.Check(ctx, r.RestConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore)
+		if err != nil {
+			return r.recordError(ctx, &wr, interval, err)
+		}
+	}
+
 	// Only notify on a change of state, not on every poll — otherwise a
 	// long-standing drift would re-alert every pollInterval forever. A
 	// LastChecked of zero means this is the resource's first ever check,

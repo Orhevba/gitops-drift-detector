@@ -56,6 +56,12 @@ spec:
                   description: "Kind/name entries excluded from orphan detection."
                   items:
                     type: string
+                autoRemediate:
+                  type: boolean
+                  description: Apply Git's version automatically to fix MISSING/DRIFTED resources instead of only reporting them. Off by default.
+                pruneOrphans:
+                  type: boolean
+                  description: Additionally delete resources not declared in Git. Has no effect unless autoRemediate is true. Off by default — destructive.
             status:
               type: object
               properties:

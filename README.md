@@ -130,9 +130,44 @@ long-standing drift doesn't re-alert every `pollInterval` forever.
 If neither variable is set, notifications are silently disabled (a no-op)
 — everything else still works.
 
+## Auto-remediation (optional, off by default)
+
+By default this tool only *reports* drift. Set `autoRemediate: true` on a
+`WatchedRepo` and it will also *fix* it: missing resources are created,
+and drifted ones are patched back to match Git — via [server-side
+apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/),
+so it only touches the fields it manages rather than overwriting fields
+other tools or the cluster itself own.
+
+```yaml
+spec:
+  autoRemediate: true   # create MISSING and fix DRIFTED resources
+  pruneOrphans: true    # also delete resources not declared in Git (no effect without autoRemediate)
+```
+
+**Read this before turning it on:**
+- `pruneOrphans: true` means the controller will `kubectl delete` anything
+  in the target namespace of a kind your manifests use, that isn't in
+  Git. If your manifests declare a `ConfigMap`, *every* `ConfigMap` in
+  that namespace not in Git gets deleted, including ones you didn't
+  realize were untracked. Start with `autoRemediate: true` and
+  `pruneOrphans` left off, and only enable pruning once you're confident
+  the namespace only contains what you expect.
+- The manager's RBAC (`config/rbac/rbac.yaml`) grants
+  `create`/`update`/`patch`/`delete` cluster-wide the moment it's
+  installed at all — remediation isn't gated per-`WatchedRepo` at the
+  RBAC layer, only in application logic. Anyone who can edit a
+  `WatchedRepo` can turn on cluster-wide write access for the manager's
+  identity.
+- After remediating, the controller re-checks rather than assuming the
+  patch worked (a patch can be accepted without producing the expected
+  result, e.g. hitting an immutable field) — but that only catches
+  *detectable* problems, not every possible side effect of an automated
+  write to your cluster.
+
 ## Roadmap
 
 - [x] Rebuild as a controller (`controller-runtime` + CRD)
 - [x] Support Kustomize overlays, not just plain YAML
 - [x] Alert on drift (Telegram; Slack/other webhooks can reuse the same `notify.Notifier` interface)
-- [ ] Optional auto-remediation (apply Git's version to fix drift automatically)
+- [x] Optional auto-remediation (apply Git's version to fix drift automatically, via server-side apply)
