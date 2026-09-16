@@ -33,11 +33,30 @@ const (
 	colorYellow = "\033[33m"
 )
 
+// defaultIgnoredOrphans lists resources Kubernetes itself injects into every
+// namespace. Nobody puts these in Git, so they'd otherwise show up as a
+// false-positive orphan in every single run.
+var defaultIgnoredOrphans = map[string]bool{
+	"ConfigMap/kube-root-ca.crt": true,
+}
+
 func main() {
 	manifestsDir := flag.String("manifests", "", "directory of YAML manifests (the desired state)")
 	namespace := flag.String("namespace", "", "namespace to check against")
 	kubeconfig := flag.String("kubeconfig", "", "path to kubeconfig (defaults to KUBECONFIG env or ~/.kube/config)")
+	ignoreFlag := flag.String("ignore", "", "comma-separated Kind/name entries to exclude from orphan detection, e.g. \"Secret/some-webhook-cert\"")
 	flag.Parse()
+
+	ignoredOrphans := map[string]bool{}
+	for k := range defaultIgnoredOrphans {
+		ignoredOrphans[k] = true
+	}
+	for _, entry := range strings.Split(*ignoreFlag, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry != "" {
+			ignoredOrphans[entry] = true
+		}
+	}
 
 	if *manifestsDir == "" || *namespace == "" {
 		fmt.Fprintln(os.Stderr, "usage: gitops-drift-detector -manifests <dir> -namespace <ns> [-kubeconfig <path>]")
@@ -136,10 +155,14 @@ func main() {
 			continue
 		}
 		for _, item := range list.Items {
+			key := fmt.Sprintf("%s/%s", gvk.Kind, item.GetName())
+			if ignoredOrphans[key] {
+				continue
+			}
 			if !applied[item.GetName()] {
 				driftFound = true
-				fmt.Printf("%s[ORPHAN]%s %s/%s is in the cluster but not in Git\n",
-					colorRed, colorReset, gvk.Kind, item.GetName())
+				fmt.Printf("%s[ORPHAN]%s %s is in the cluster but not in Git\n",
+					colorRed, colorReset, key)
 			}
 		}
 	}

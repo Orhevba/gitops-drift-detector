@@ -28,6 +28,15 @@ Point `-manifests` at your own repo of YAML files once you've verified it
 works against the bundled example. Use `-kubeconfig` to target a specific
 kubeconfig file if it's not in the default location or `$KUBECONFIG`.
 
+Cluster-injected resources (e.g. `ConfigMap/kube-root-ca.crt`, which
+Kubernetes adds to every namespace itself) are excluded from orphan
+detection by default. Add your own exceptions with `-ignore`:
+
+```sh
+go run . -manifests ./examples/manifests -namespace default \
+  -ignore "Secret/some-webhook-cert,ConfigMap/some-operator-cache"
+```
+
 Exit code is `1` if any drift was found, `0` if everything is in sync —
 so it can be wired into CI later.
 
