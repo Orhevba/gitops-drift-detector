@@ -14,7 +14,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	driftv1alpha1 "github.com/tygacookie/gitops-drift-detector/api/v1alpha1"
 	"github.com/tygacookie/gitops-drift-detector/internal/drift"
@@ -89,8 +91,15 @@ func (r *WatchedRepoReconciler) recordError(ctx context.Context, wr *driftv1alph
 }
 
 func (r *WatchedRepoReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Only re-reconcile on watch events when .spec actually changed (i.e.
+	// .metadata.generation bumped). Without this, our own periodic
+	// .status.lastChecked write would fire a watch event that immediately
+	// triggers another reconcile, tightening the loop far below
+	// pollInterval. Status updates don't bump generation because the CRD
+	// has the status subresource enabled — the scheduled RequeueAfter
+	// still drives normal periodic checks regardless of this filter.
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&driftv1alpha1.WatchedRepo{}).
+		For(&driftv1alpha1.WatchedRepo{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 
