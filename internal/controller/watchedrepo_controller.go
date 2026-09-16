@@ -62,6 +62,14 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.recordError(ctx, &wr, interval, err)
 	}
 
+	// observed is what was actually found THIS reconcile, before any
+	// remediation — used below to detect a real transition. Comparing
+	// only the before/after *persisted* status would miss a drift that
+	// gets auto-fixed within the same reconcile it's detected in (the
+	// "drifted" moment would never be observed as a change from what was
+	// last written to status).
+	observed := result
+
 	if wr.Spec.AutoRemediate && result.HasDrift() {
 		remediation, remErr := drift.Remediate(ctx, r.RestConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore,
 			drift.RemediateOptions{PruneOrphans: wr.Spec.PruneOrphans})
@@ -92,6 +100,7 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// against yet).
 	isFirstCheck := wr.Status.LastChecked.IsZero()
 	wasInSync := wr.Status.InSync
+	observedInSync := !observed.HasDrift()
 
 	wr.Status.LastChecked = metav1.Now()
 	wr.Status.Error = ""
@@ -113,8 +122,8 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	log.Info("checked WatchedRepo", "name", wr.Name, "inSync", wr.Status.InSync, "driftCount", wr.Status.DriftCount)
 
-	if !isFirstCheck && wr.Status.InSync != wasInSync {
-		if err := r.Notifier.Notify(ctx, driftMessage(&wr)); err != nil {
+	if !isFirstCheck && observedInSync != wasInSync {
+		if err := r.Notifier.Notify(ctx, transitionMessage(&wr, observed)); err != nil {
 			log.Error(err, "failed to send drift notification")
 		}
 	}
@@ -122,14 +131,26 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{RequeueAfter: interval}, nil
 }
 
-func driftMessage(wr *driftv1alpha1.WatchedRepo) string {
-	if wr.Status.InSync {
+// transitionMessage describes a sync-state transition. observed is what
+// drift.Check found THIS reconcile before any remediation ran, so the
+// message reflects what actually happened even when auto-remediation fixed
+// it before the persisted status ever recorded it as broken.
+func transitionMessage(wr *driftv1alpha1.WatchedRepo, observed drift.Result) string {
+	if !observed.HasDrift() {
 		return fmt.Sprintf("✅ WatchedRepo %s/%s is back in sync.", wr.Namespace, wr.Name)
 	}
+
 	var b strings.Builder
-	fmt.Fprintf(&b, "⚠️ WatchedRepo %s/%s drifted (%d resource(s)):\n", wr.Namespace, wr.Name, wr.Status.DriftCount)
-	for _, d := range wr.Status.Drift {
-		fmt.Fprintf(&b, "- [%s] %s/%s\n", d.Status, d.Kind, d.Name)
+	if wr.Status.InSync {
+		fmt.Fprintf(&b, "🔧 WatchedRepo %s/%s drifted and was automatically fixed:\n", wr.Namespace, wr.Name)
+	} else {
+		fmt.Fprintf(&b, "⚠️ WatchedRepo %s/%s drifted (%d resource(s)):\n", wr.Namespace, wr.Name, wr.Status.DriftCount)
+	}
+	for _, e := range observed.Entries {
+		if e.Status == drift.StatusInSync {
+			continue
+		}
+		fmt.Fprintf(&b, "- [%s] %s/%s\n", e.Status, e.Kind, e.Name)
 	}
 	return b.String()
 }
