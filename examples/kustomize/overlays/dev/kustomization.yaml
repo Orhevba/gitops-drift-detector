@@ -1,0 +1,8 @@
+resources:
+  - ../../base
+
+namespace: default
+
+replicas:
+  - name: kustomize-demo
+    count: 2

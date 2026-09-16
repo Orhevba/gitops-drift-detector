@@ -11,6 +11,11 @@ actually running in a cluster, and reports drift:
 Only compares fields that are present in the Git manifest — fields the
 cluster/API server adds on its own (status, defaults, etc.) are ignored.
 
+Kustomize is supported automatically: if the directory you point at
+contains a `kustomization.yaml`, it's rendered with the Kustomize engine
+first (see `examples/kustomize/overlays/dev`); otherwise every plain YAML
+file in the directory is parsed as-is (see `examples/manifests`).
+
 There are two ways to run it:
 
 - **`cmd/check`** — a one-shot CLI. Point it at a local manifests directory
@@ -96,6 +101,6 @@ specific apiGroups/resources before running this anywhere that matters.
 ## Roadmap
 
 - [x] Rebuild as a controller (`controller-runtime` + CRD)
-- [ ] Support Kustomize overlays, not just plain YAML
+- [x] Support Kustomize overlays, not just plain YAML
 - [ ] Slack/webhook alert on drift
 - [ ] Optional auto-remediation (apply Git's version to fix drift automatically)

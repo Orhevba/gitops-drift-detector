@@ -22,6 +22,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 	sigsyaml "sigs.k8s.io/yaml"
 )
 
@@ -195,7 +197,48 @@ func resourceInterface(dynClient dynamic.Interface, mapping *meta.RESTMapping, n
 	return dynClient.Resource(mapping.Resource)
 }
 
+// loadManifests renders manifests from dir. If dir contains a Kustomize
+// entry point (kustomization.yaml/.yml), it's built with the Kustomize
+// engine; otherwise every plain YAML file in the directory is parsed as-is.
 func loadManifests(dir string) ([]*unstructured.Unstructured, error) {
+	if hasKustomization(dir) {
+		return loadKustomizeManifests(dir)
+	}
+	return loadPlainManifests(dir)
+}
+
+func hasKustomization(dir string) bool {
+	for _, name := range []string{"kustomization.yaml", "kustomization.yml", "Kustomization"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func loadKustomizeManifests(dir string) ([]*unstructured.Unstructured, error) {
+	fSys := filesys.MakeFsOnDisk()
+	result, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(fSys, dir)
+	if err != nil {
+		return nil, fmt.Errorf("kustomize build failed: %w", err)
+	}
+
+	var objs []*unstructured.Unstructured
+	for _, res := range result.Resources() {
+		raw, err := res.AsYAML()
+		if err != nil {
+			return nil, fmt.Errorf("failed to render %s: %w", res.GetName(), err)
+		}
+		obj := &unstructured.Unstructured{}
+		if err := sigsyaml.Unmarshal(raw, obj); err != nil {
+			return nil, fmt.Errorf("failed to parse rendered %s: %w", res.GetName(), err)
+		}
+		objs = append(objs, obj)
+	}
+	return objs, nil
+}
+
+func loadPlainManifests(dir string) ([]*unstructured.Unstructured, error) {
 	var objs []*unstructured.Unstructured
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
