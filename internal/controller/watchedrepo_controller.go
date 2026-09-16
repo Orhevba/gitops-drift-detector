@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,6 +52,11 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
+	targetConfig, err := r.restConfigFor(ctx, &wr)
+	if err != nil {
+		return r.recordError(ctx, &wr, interval, fmt.Errorf("resolving target cluster failed: %w", err))
+	}
+
 	dir, cleanup, err := cloneRepo(wr.Spec.RepoURL, wr.Spec.Branch)
 	if err != nil {
 		return r.recordError(ctx, &wr, interval, fmt.Errorf("git clone failed: %w", err))
@@ -57,7 +64,7 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	defer cleanup()
 
 	manifestsPath := filepath.Join(dir, wr.Spec.Path)
-	result, err := drift.Check(ctx, r.RestConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore)
+	result, err := drift.Check(ctx, targetConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore)
 	if err != nil {
 		return r.recordError(ctx, &wr, interval, err)
 	}
@@ -71,7 +78,7 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	observed := result
 
 	if wr.Spec.AutoRemediate && result.HasDrift() {
-		remediation, remErr := drift.Remediate(ctx, r.RestConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore,
+		remediation, remErr := drift.Remediate(ctx, targetConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore,
 			drift.RemediateOptions{PruneOrphans: wr.Spec.PruneOrphans})
 		if remErr != nil {
 			log.Error(remErr, "remediation failed", "name", wr.Name)
@@ -87,7 +94,7 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// be accepted by the API server without producing the expected
 		// result (e.g. an immutable field), so status should reflect
 		// reality, not intent.
-		result, err = drift.Check(ctx, r.RestConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore)
+		result, err = drift.Check(ctx, targetConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore)
 		if err != nil {
 			return r.recordError(ctx, &wr, interval, err)
 		}
@@ -153,6 +160,36 @@ func transitionMessage(wr *driftv1alpha1.WatchedRepo, observed drift.Result) str
 		fmt.Fprintf(&b, "- [%s] %s/%s\n", e.Status, e.Kind, e.Name)
 	}
 	return b.String()
+}
+
+// restConfigFor returns the cluster to check for wr: the manager's own
+// cluster by default, or a different one if wr.Spec.KubeconfigSecretRef
+// points at a Secret holding a kubeconfig for it.
+func (r *WatchedRepoReconciler) restConfigFor(ctx context.Context, wr *driftv1alpha1.WatchedRepo) (*rest.Config, error) {
+	ref := wr.Spec.KubeconfigSecretRef
+	if ref == nil {
+		return r.RestConfig, nil
+	}
+
+	key := ref.Key
+	if key == "" {
+		key = "kubeconfig"
+	}
+
+	var secret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: wr.Namespace, Name: ref.Name}, &secret); err != nil {
+		return nil, fmt.Errorf("failed to get kubeconfig secret %q: %w", ref.Name, err)
+	}
+	data, ok := secret.Data[key]
+	if !ok {
+		return nil, fmt.Errorf("secret %q has no key %q", ref.Name, key)
+	}
+
+	cfg, err := clientcmd.RESTConfigFromKubeConfig(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse kubeconfig from secret %q: %w", ref.Name, err)
+	}
+	return cfg, nil
 }
 
 func (r *WatchedRepoReconciler) recordError(ctx context.Context, wr *driftv1alpha1.WatchedRepo, interval time.Duration, checkErr error) (ctrl.Result, error) {

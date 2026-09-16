@@ -3,24 +3,30 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"net/http"
 	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmanager "sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	driftv1alpha1 "github.com/tygacookie/gitops-drift-detector/api/v1alpha1"
 	"github.com/tygacookie/gitops-drift-detector/internal/controller"
+	"github.com/tygacookie/gitops-drift-detector/internal/dashboard"
 	"github.com/tygacookie/gitops-drift-detector/internal/notify"
 )
 
 func main() {
-	var metricsAddr string
+	var metricsAddr, dashboardAddr string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "address the metrics endpoint binds to")
+	flag.StringVar(&dashboardAddr, "dashboard-bind-address", ":8090", "address the web dashboard binds to")
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New())
@@ -52,6 +58,24 @@ func main() {
 		Notifier:   notifier,
 	}).SetupWithManager(mgr); err != nil {
 		log.Error(err, "unable to create controller")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(ctrlmanager.RunnableFunc(func(ctx context.Context) error {
+		srv := &http.Server{Addr: dashboardAddr, Handler: dashboard.NewHandler(mgr.GetClient())}
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(shutdownCtx)
+		}()
+		log.Info("starting dashboard", "address", dashboardAddr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})); err != nil {
+		log.Error(err, "unable to add dashboard")
 		os.Exit(1)
 	}
 

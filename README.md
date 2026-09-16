@@ -165,9 +165,51 @@ spec:
   *detectable* problems, not every possible side effect of an automated
   write to your cluster.
 
+## Multi-cluster
+
+One manager (running in one cluster) can check `WatchedRepo`s against
+*other* clusters too, not just its own. Point a `WatchedRepo` at a
+Secret in its own namespace holding a kubeconfig for the target cluster:
+
+```yaml
+spec:
+  kubeconfigSecretRef:
+    name: staging-cluster-kubeconfig
+    key: kubeconfig   # optional, this is the default
+```
+
+```sh
+kubectl create secret generic staging-cluster-kubeconfig \
+  -n drift-system \
+  --from-file=kubeconfig=/path/to/staging.kubeconfig
+```
+
+Omit `kubeconfigSecretRef` (the default) and the manager checks its own
+cluster, same as before. The manager's own RBAC already covers reading
+this Secret (see the broad grant note above) — there's no separate
+permission to set up.
+
+## Web dashboard
+
+The manager also serves a small read-only dashboard listing every
+`WatchedRepo` it knows about — namespace, target repo/path/cluster,
+in-sync status, and current drift — refreshing every 30s.
+
+Locally (`go run ./cmd/manager`), it's just `http://localhost:8090`.
+In-cluster, reach it via port-forward:
+```sh
+kubectl port-forward svc/gitops-drift-detector-dashboard 8090:8090 -n drift-system
+```
+then open `http://localhost:8090`. Change `--dashboard-bind-address` (or
+the Service in `config/manager/deployment.yaml`) if you want it exposed
+differently — it has no authentication of its own, so don't put it on
+the open internet without adding some.
+
 ## Roadmap
 
 - [x] Rebuild as a controller (`controller-runtime` + CRD)
 - [x] Support Kustomize overlays, not just plain YAML
 - [x] Alert on drift (Telegram; Slack/other webhooks can reuse the same `notify.Notifier` interface)
 - [x] Optional auto-remediation (apply Git's version to fix drift automatically, via server-side apply)
+- [x] Multi-cluster support (a `WatchedRepo` can target a different cluster than the manager's own, via a kubeconfig Secret)
+- [x] Web dashboard listing every `WatchedRepo` and its status

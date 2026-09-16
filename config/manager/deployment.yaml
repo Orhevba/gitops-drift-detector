@@ -29,6 +29,10 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - --metrics-bind-address=:8080
+            - --dashboard-bind-address=:8090
+          ports:
+            - name: dashboard
+              containerPort: 8090
           env:
             # Created via:
             #   kubectl create secret generic gitops-drift-detector-telegram \
@@ -49,3 +53,18 @@ spec:
                   name: gitops-drift-detector-telegram
                   key: chat-id
                   optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitops-drift-detector-dashboard
+  namespace: drift-system
+spec:
+  selector:
+    app: gitops-drift-detector
+  ports:
+    - port: 8090
+      targetPort: dashboard
+  # ClusterIP by default — reach it with `kubectl port-forward
+  # svc/gitops-drift-detector-dashboard 8090:8090 -n drift-system`, or
+  # change this to NodePort/LoadBalancer if you want it reachable directly.

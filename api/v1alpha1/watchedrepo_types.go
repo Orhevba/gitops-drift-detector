@@ -41,6 +41,21 @@ type WatchedRepoSpec struct {
 	// is also true. Off by default — this is destructive.
 	// +optional
 	PruneOrphans bool `json:"pruneOrphans,omitempty"`
+
+	// KubeconfigSecretRef optionally points to a Secret (in this
+	// WatchedRepo's own namespace) containing a kubeconfig for a
+	// *different* cluster than the one the manager itself runs in. If
+	// unset, the manager's own cluster is checked instead.
+	// +optional
+	KubeconfigSecretRef *SecretKeyRef `json:"kubeconfigSecretRef,omitempty"`
+}
+
+// SecretKeyRef references one key within a Secret in the same namespace.
+type SecretKeyRef struct {
+	Name string `json:"name"`
+	// Key defaults to "kubeconfig" if unset.
+	// +optional
+	Key string `json:"key,omitempty"`
 }
 
 // DriftEntry describes one resource that isn't in sync.
@@ -97,6 +112,10 @@ func (in *WatchedRepoSpec) DeepCopyInto(out *WatchedRepoSpec) {
 		out.Ignore = make([]string, len(in.Ignore))
 		copy(out.Ignore, in.Ignore)
 	}
+	if in.KubeconfigSecretRef != nil {
+		out.KubeconfigSecretRef = new(SecretKeyRef)
+		*out.KubeconfigSecretRef = *in.KubeconfigSecretRef
+	}
 }
 
 func (in *WatchedRepoSpec) DeepCopy() *WatchedRepoSpec {
@@ -104,6 +123,19 @@ func (in *WatchedRepoSpec) DeepCopy() *WatchedRepoSpec {
 		return nil
 	}
 	out := new(WatchedRepoSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *SecretKeyRef) DeepCopyInto(out *SecretKeyRef) {
+	*out = *in
+}
+
+func (in *SecretKeyRef) DeepCopy() *SecretKeyRef {
+	if in == nil {
+		return nil
+	}
+	out := new(SecretKeyRef)
 	in.DeepCopyInto(out)
 	return out
 }
