@@ -73,7 +73,7 @@ const pageHTML = `<!doctype html>
 {{range .}}
 <tr>
   <td>{{.Namespace}}</td>
-  <td>{{.Name}}{{if .Spec.AutoRemediate}}<span class="remediate-badge">auto</span>{{end}}</td>
+  <td>{{.Name}}{{if .Spec.AutoRemediate}} <span class="remediate-badge">auto</span>{{end}}</td>
   <td class="target">{{.Spec.RepoURL}}@{{.Spec.Branch}}<br>{{.Spec.Path}} &rarr; ns/{{.Spec.Namespace}}{{if .Spec.KubeconfigSecretRef}} (remote cluster){{end}}</td>
   <td>
     {{if .Status.Error}}<span class="error-badge">ERROR</span>
