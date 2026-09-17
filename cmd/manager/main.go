@@ -67,13 +67,13 @@ func main() {
 			Handler:           dashboard.NewHandler(mgr.GetClient()),
 			ReadHeaderTimeout: 5 * time.Second, // mitigate slow-header (Slowloris-style) requests
 		}
+		// #nosec G118 -- context.Background() below is deliberate: ctx is
+		// already cancelled by the time this goroutine wakes up (that's
+		// what <-ctx.Done() waits for), so a context derived from it would
+		// be cancelled immediately too, defeating the shutdown grace period.
 		go func() {
 			<-ctx.Done()
-			// context.Background(), not ctx, deliberately: ctx is already
-			// cancelled at this point (that's why this goroutine woke up),
-			// so a context derived from it would be cancelled immediately
-			// too — defeating the point of giving Shutdown a grace period.
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // #nosec G118 -- see comment above
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = srv.Shutdown(shutdownCtx)
 		}()
