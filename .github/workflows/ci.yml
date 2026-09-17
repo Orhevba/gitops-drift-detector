@@ -1,37 +1,30 @@
 name: CI
 
+# Uses reusable workflows from ci-pipeline-kit instead of inlining the
+# steps here — see https://github.com/Orhevba/ci-pipeline-kit. This also
+# adds a security-scan stage (gosec + govulncheck) this project didn't
+# have before; go-version is pinned to 1.23 explicitly (rather than
+# trusting whatever ci-pipeline-kit's own default happens to be) since
+# that's the version known to be patched against GO-2025-3750, a real
+# stdlib vulnerability found while building that kit.
+
 on:
   push:
     branches: [master]
   pull_request:
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+  lint:
+    uses: Orhevba/ci-pipeline-kit/.github/workflows/go-lint.yml@master
+    with:
+      go-version: "1.23"
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache: true
+  test:
+    uses: Orhevba/ci-pipeline-kit/.github/workflows/go-test.yml@master
+    with:
+      go-version: "1.23"
 
-      - name: Check formatting
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "The following files are not gofmt-formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Build
-        run: go build ./...
-
-      - name: Test
-        run: go test ./... -v -cover
+  security-scan:
+    uses: Orhevba/ci-pipeline-kit/.github/workflows/go-security-scan.yml@master
+    with:
+      go-version: "1.23"
