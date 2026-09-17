@@ -64,7 +64,11 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return r.recordError(ctx, &wr, interval, fmt.Errorf("git clone failed: %w", err))
 	}
-	defer cleanup()
+	defer func() {
+		if err := cleanup(); err != nil {
+			log.Error(err, "failed to clean up temp clone directory")
+		}
+	}()
 
 	manifestsPath := filepath.Join(dir, wr.Spec.Path)
 	result, err := drift.Check(ctx, targetConfig, manifestsPath, wr.Spec.Namespace, wr.Spec.Ignore)
@@ -219,12 +223,14 @@ func (r *WatchedRepoReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // cloneRepo shallow-clones repoURL (optionally at branch) into a temp
 // directory and returns it along with a cleanup function to remove it.
-func cloneRepo(repoURL, branch string) (string, func(), error) {
+// cleanup returns an error rather than swallowing it, so callers can at
+// least log a failed cleanup instead of it vanishing silently.
+func cloneRepo(repoURL, branch string) (string, func() error, error) {
 	dir, err := os.MkdirTemp("", "watchedrepo-")
 	if err != nil {
-		return "", func() {}, err
+		return "", func() error { return nil }, err
 	}
-	cleanup := func() { os.RemoveAll(dir) }
+	cleanup := func() error { return os.RemoveAll(dir) }
 
 	args := []string{"clone", "--depth", "1"}
 	if branch != "" {
@@ -235,8 +241,10 @@ func cloneRepo(repoURL, branch string) (string, func(), error) {
 	cmd := exec.Command("git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("%s: %w", string(out), err)
+		// A failed clone means dir is empty anyway; the git-clone error
+		// is the one worth surfacing here, not a cleanup failure on it.
+		_ = cleanup()
+		return "", func() error { return nil }, fmt.Errorf("%s: %w", string(out), err)
 	}
 	return dir, cleanup, nil
 }
