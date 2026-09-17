@@ -1,5 +1,6 @@
 # gitops-drift-detector
 
+[![CI](https://github.com/Orhevba/gitops-drift-detector/actions/workflows/ci.yml/badge.svg)](https://github.com/Orhevba/gitops-drift-detector/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-controller--runtime-326CE5?logo=kubernetes&logoColor=white)](https://github.com/kubernetes-sigs/controller-runtime)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -280,6 +281,39 @@ the Service in `config/manager/deployment.yaml`) if you want it exposed
 differently — it has no authentication of its own, so don't put it on
 the open internet without adding some.
 
+## Testing
+
+```sh
+go test ./... -v -cover
+```
+
+Covered:
+- The diff engine (`internal/drift`) — including regression tests for the
+  two real correctness bugs found by testing against a live cluster (a
+  false-positive on list fields like containers, and the "only compare
+  fields Git actually mentions" behavior).
+- Manifest loading — plain YAML directories and Kustomize overlays
+  (including that an overlay patch, e.g. a replica count override,
+  actually gets applied).
+- The Telegram notifier — request shape and error handling, against a
+  local `httptest` server rather than the real API.
+- Multi-cluster config resolution (`restConfigFor`) — using
+  `controller-runtime`'s fake client, no real cluster needed.
+
+**Deliberately not covered:** `drift.Check`/`drift.Remediate`'s actual
+cluster interaction, and the full `Reconcile` loop end-to-end. Testing
+those properly needs either `envtest` (a real API server binary
+Kubebuilder-based projects download and run in CI) or a much deeper fake
+`dynamic.Interface`/`RESTMapper` — both are more infrastructure than this
+project's size currently justifies. In practice, that gap is exactly why
+this project was built and tested against a real k3s cluster throughout
+instead of only trusting unit tests — see the bugs section in the git
+history (and `~/Documents/gitops-drift-detector-journey.md`, if you have
+it) for what that caught that tests alone wouldn't have.
+
+CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go vet`, `go build`,
+and this test suite on every push/PR.
+
 ## Roadmap
 
 - [x] Rebuild as a controller (`controller-runtime` + CRD)
@@ -288,3 +322,4 @@ the open internet without adding some.
 - [x] Optional auto-remediation (apply Git's version to fix drift automatically, via server-side apply)
 - [x] Multi-cluster support (a `WatchedRepo` can target a different cluster than the manager's own, via a kubeconfig Secret)
 - [x] Web dashboard listing every `WatchedRepo` and its status
+- [x] Unit tests + CI (GitHub Actions)

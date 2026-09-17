@@ -27,10 +27,18 @@ func (NoopNotifier) Notify(context.Context, string) error { return nil }
 type TelegramNotifier struct {
 	Token  string
 	ChatID string
+	// BaseURL overrides the Telegram API base URL — used by tests to point
+	// at a local httptest server instead of the real API. Defaults to the
+	// real API when empty.
+	BaseURL string
 }
 
 func (t TelegramNotifier) Notify(ctx context.Context, message string) error {
-	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", t.Token)
+	base := t.BaseURL
+	if base == "" {
+		base = "https://api.telegram.org"
+	}
+	endpoint := fmt.Sprintf("%s/bot%s/sendMessage", base, t.Token)
 	body, err := json.Marshal(map[string]string{
 		"chat_id": t.ChatID,
 		"text":    message,
