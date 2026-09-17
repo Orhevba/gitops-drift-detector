@@ -263,7 +263,12 @@ permission to set up.
 
 The manager also serves a small read-only dashboard listing every
 `WatchedRepo` it knows about — namespace, target repo/path/cluster,
-in-sync status, and current drift — refreshing every 30s.
+in-sync status, current drift, its poll interval, and an *estimate* of
+the next check time (`Last Checked` + the effective poll interval) —
+refreshing every 30s. That estimate is exactly that: an estimate,
+computed client-side from the last known check time, not a live
+countdown — the actual next reconcile can also be triggered early by a
+`spec` change (see `kubectl patch ... pollInterval` earlier in this doc).
 
 Locally (`go run ./cmd/manager`), it's just `http://localhost:8090`.
 

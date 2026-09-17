@@ -6,10 +6,12 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	driftv1alpha1 "github.com/Orhevba/gitops-drift-detector/api/v1alpha1"
+	"github.com/Orhevba/gitops-drift-detector/internal/controller"
 )
 
 // NewHandler returns an http.Handler that lists WatchedRepo resources via c.
@@ -19,6 +21,16 @@ func NewHandler(c client.Client) http.Handler {
 
 type handler struct {
 	client client.Client
+}
+
+// row is what the template actually renders: a WatchedRepo plus a couple of
+// values computed once here rather than in the template itself (Go's
+// html/template can call methods but doing duration math there would be
+// harder to read than just precomputing it).
+type row struct {
+	driftv1alpha1.WatchedRepo
+	PollIntervalDisplay string
+	NextCheckEstimate   string
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -35,10 +47,33 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return list.Items[i].Name < list.Items[j].Name
 	})
 
+	rows := make([]row, len(list.Items))
+	for i, wr := range list.Items {
+		interval := effectiveInterval(wr)
+		r := row{WatchedRepo: wr, PollIntervalDisplay: interval.String()}
+		if !wr.Status.LastChecked.IsZero() {
+			r.NextCheckEstimate = wr.Status.LastChecked.Add(interval).Format("15:04:05")
+		}
+		rows[i] = r
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := pageTemplate.Execute(w, list.Items); err != nil {
+	if err := pageTemplate.Execute(w, rows); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// effectiveInterval returns what the controller will actually use for wr —
+// its declared pollInterval, or the real default when unset/invalid, rather
+// than a guess at what "default" means that could drift out of sync with
+// the controller's own logic.
+func effectiveInterval(wr driftv1alpha1.WatchedRepo) time.Duration {
+	if wr.Spec.PollInterval != "" {
+		if d, err := time.ParseDuration(wr.Spec.PollInterval); err == nil {
+			return d
+		}
+	}
+	return controller.DefaultPollInterval
 }
 
 var pageTemplate = template.Must(template.New("page").Parse(pageHTML))
@@ -69,7 +104,7 @@ const pageHTML = `<!doctype html>
 {{if not .}}<p class="empty">No WatchedRepo resources found.</p>{{end}}
 {{if .}}
 <table>
-<tr><th>Namespace</th><th>Name</th><th>Target</th><th>Status</th><th>Detail</th><th>Last Checked</th></tr>
+<tr><th>Namespace</th><th>Name</th><th>Target</th><th>Status</th><th>Detail</th><th>Poll Interval</th><th>Last Checked</th><th>Next Check (est.)</th></tr>
 {{range .}}
 <tr>
   <td>{{.Namespace}}</td>
@@ -84,7 +119,9 @@ const pageHTML = `<!doctype html>
     {{if .Status.Error}}{{.Status.Error}}
     {{else}}<ul class="drift-list">{{range .Status.Drift}}<li>[{{.Status}}] {{.Kind}}/{{.Name}}</li>{{end}}</ul>{{end}}
   </td>
+  <td>{{.PollIntervalDisplay}}</td>
   <td>{{.Status.LastChecked}}</td>
+  <td>{{.NextCheckEstimate}}</td>
 </tr>
 {{end}}
 </table>

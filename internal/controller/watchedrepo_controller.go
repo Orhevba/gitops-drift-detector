@@ -26,7 +26,10 @@ import (
 	"github.com/Orhevba/gitops-drift-detector/internal/notify"
 )
 
-const defaultPollInterval = 5 * time.Minute
+// DefaultPollInterval is used when a WatchedRepo doesn't set spec.pollInterval.
+// Exported so the dashboard can display the real effective interval instead
+// of a hardcoded guess at what "default" means.
+const DefaultPollInterval = 5 * time.Minute
 
 // WatchedRepoReconciler reconciles a WatchedRepo object.
 type WatchedRepoReconciler struct {
@@ -43,7 +46,7 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	interval := defaultPollInterval
+	interval := DefaultPollInterval
 	if wr.Spec.PollInterval != "" {
 		if d, err := time.ParseDuration(wr.Spec.PollInterval); err == nil {
 			interval = d
