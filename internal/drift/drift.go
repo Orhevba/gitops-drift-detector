@@ -403,7 +403,13 @@ func loadPlainManifests(dir string) ([]*unstructured.Unstructured, error) {
 			return nil
 		}
 
-		f, err := os.Open(path)
+		// path comes from walking a directory this tool was explicitly
+		// configured to read (-manifests flag, or a WatchedRepo's own
+		// spec.path in a repo it was pointed at) — not an untrusted path
+		// from a network-facing input. Whoever controls that input already
+		// controls what manifests get applied to the cluster, which is a
+		// far more direct capability than reading arbitrary files here.
+		f, err := os.Open(path) // #nosec G304,G122 -- see comment above
 		if err != nil {
 			return err
 		}

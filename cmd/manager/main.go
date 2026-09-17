@@ -62,10 +62,18 @@ func main() {
 	}
 
 	if err := mgr.Add(ctrlmanager.RunnableFunc(func(ctx context.Context) error {
-		srv := &http.Server{Addr: dashboardAddr, Handler: dashboard.NewHandler(mgr.GetClient())}
+		srv := &http.Server{
+			Addr:              dashboardAddr,
+			Handler:           dashboard.NewHandler(mgr.GetClient()),
+			ReadHeaderTimeout: 5 * time.Second, // mitigate slow-header (Slowloris-style) requests
+		}
 		go func() {
 			<-ctx.Done()
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// context.Background(), not ctx, deliberately: ctx is already
+			// cancelled at this point (that's why this goroutine woke up),
+			// so a context derived from it would be cancelled immediately
+			// too — defeating the point of giving Shutdown a grace period.
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // #nosec G118 -- see comment above
 			defer cancel()
 			_ = srv.Shutdown(shutdownCtx)
 		}()
