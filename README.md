@@ -136,6 +136,37 @@ resource kind — the checker can't know ahead of time what to scope down
 to. Fine for a personal cluster; tighten `config/rbac/rbac.yaml` to
 specific apiGroups/resources before running this anywhere that matters.
 
+### Ignoring specific resources
+
+A namespace usually has things in it that were never meant to be tracked
+in Git — a Helm-managed release, for instance, which already has its own
+tool (`helm upgrade`) managing it and doesn't need a second one claiming
+ownership via a duplicated manifest. Rather than writing a manifest just
+to make the `ORPHAN` warning go away, exclude it explicitly with
+`spec.ignore` (a list of `"Kind/name"` strings, same format as the CLI's
+`-ignore` flag):
+
+```sh
+kubectl patch watchedrepo demo -n drift-system --type merge \
+  -p '{"spec":{"ignore":["Deployment/my-release"]}}'
+```
+
+Note this is a JSON *merge* patch, so it replaces the whole `ignore`
+list rather than appending to it — include every entry you want kept
+each time, e.g. `{"ignore":["Deployment/my-release","ConfigMap/some-cache"]}`.
+The same field can be set directly in a `WatchedRepo`'s YAML instead of
+patching it:
+```yaml
+spec:
+  ignore:
+    - Deployment/my-release
+    - ConfigMap/some-cache
+```
+
+`ConfigMap/kube-root-ca.crt` (which Kubernetes injects into every
+namespace automatically) is excluded by default, always, on top of
+whatever you add here.
+
 ## Drift notifications (Telegram)
 
 The manager sends a Telegram message whenever a `WatchedRepo` **changes**
