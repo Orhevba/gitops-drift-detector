@@ -60,11 +60,15 @@ metadata:
   name: gitops-drift-detector-dashboard
   namespace: drift-system
 spec:
+  # LoadBalancer, not the ClusterIP default: k3s ships a built-in lightweight
+  # load balancer (Klipper) that, on a single-node cluster, binds this port
+  # directly onto the node's own IP — so the dashboard becomes reachable at
+  # http://<node-ip>:8090/ with no `kubectl port-forward` needed. The
+  # dashboard has no authentication of its own, so this is fine on a private
+  # home network but shouldn't be exposed further than that without adding some.
+  type: LoadBalancer
   selector:
     app: gitops-drift-detector
   ports:
     - port: 8090
       targetPort: dashboard
-  # ClusterIP by default — reach it with `kubectl port-forward
-  # svc/gitops-drift-detector-dashboard 8090:8090 -n drift-system`, or
-  # change this to NodePort/LoadBalancer if you want it reachable directly.

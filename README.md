@@ -234,7 +234,13 @@ The manager also serves a small read-only dashboard listing every
 in-sync status, and current drift — refreshing every 30s.
 
 Locally (`go run ./cmd/manager`), it's just `http://localhost:8090`.
-In-cluster, reach it via port-forward:
+
+In-cluster, the Service is `type: LoadBalancer` — on a single-node k3s
+cluster, k3s's built-in load balancer (Klipper) binds that port directly
+onto the node's own IP, so it's reachable straight away at
+`http://<node-ip>:8090/`, no port-forward required. If you'd rather not
+expose it on the network at all, switch the Service back to `ClusterIP`
+and use port-forward instead:
 ```sh
 kubectl port-forward svc/gitops-drift-detector-dashboard 8090:8090 -n drift-system
 ```
