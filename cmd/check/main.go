@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/tygacookie/gitops-drift-detector/internal/drift"
+	"github.com/Orhevba/gitops-drift-detector/internal/drift"
 )
 
 const (

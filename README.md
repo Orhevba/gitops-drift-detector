@@ -1,31 +1,69 @@
 # gitops-drift-detector
 
-Compares Kubernetes manifests (your Git source of truth) against what's
-actually running in a cluster, and reports drift:
+[![Go](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Kubernetes](https://img.shields.io/badge/kubernetes-controller--runtime-326CE5?logo=kubernetes&logoColor=white)](https://github.com/kubernetes-sigs/controller-runtime)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-- `MISSING` — declared in Git, not deployed
-- `DRIFTED` — deployed, but fields differ from Git
-- `ORPHAN`  — running in the cluster, not declared in Git
-- `IN SYNC` — matches
+A Kubernetes operator that watches for **GitOps drift** — where the live
+cluster no longer matches what's declared in Git — and can optionally fix
+it automatically. Built as a from-scratch `controller-runtime` operator
+(no Kubebuilder/Operator SDK scaffolding) with its own CRD, multi-cluster
+support, a web dashboard, and Telegram alerting.
 
-Only compares fields that are present in the Git manifest — fields the
-cluster/API server adds on its own (status, defaults, etc.) are ignored.
+```
+MISSING  → declared in Git, never deployed
+DRIFTED  → deployed, but fields differ from Git
+ORPHAN   → running in the cluster, not declared in Git
+IN SYNC  → matches
+```
 
-Kustomize is supported automatically: if the directory you point at
-contains a `kustomization.yaml`, it's rendered with the Kustomize engine
-first (see `examples/kustomize/overlays/dev`); otherwise every plain YAML
-file in the directory is parsed as-is (see `examples/manifests`).
+Only fields actually present in the Git manifest are compared — fields
+the cluster/API server adds on its own (`status`, defaults, etc.) are
+ignored, so a resource never shows as drifted just because Kubernetes
+filled in something Git never mentioned.
 
-There are two ways to run it:
+## Features
 
-- **`cmd/check`** — a one-shot CLI. Point it at a local manifests directory
-  and a kubeconfig, get a report, done.
-- **`cmd/manager`** — an in-cluster controller. Define a `WatchedRepo`
-  custom resource (Git repo URL + path + target namespace), and it
-  continuously clones, checks, and writes the result to that resource's
-  `.status`, on a schedule.
+- **Two ways to run it** — a one-shot CLI (`cmd/check`) for local/CI use,
+  or a real in-cluster controller (`cmd/manager`) reconciling a
+  `WatchedRepo` CRD on a schedule. Both share the same core logic.
+- **Plain manifests or Kustomize**, auto-detected.
+- **Optional auto-remediation** via server-side apply — creates missing
+  resources and fixes drifted ones, off by default.
+- **Multi-cluster** — one manager can check `WatchedRepo`s against other
+  clusters via a referenced kubeconfig Secret, not just its own.
+- **Telegram alerts** on real sync-state transitions (not spammy re-alerts
+  on unchanged, long-standing drift).
+- **Web dashboard** showing every `WatchedRepo` and its live status.
 
-Both share the same comparison logic in `internal/drift`.
+## Architecture
+
+```mermaid
+flowchart LR
+    Git[("Git repo<br/>(manifests)")] -->|git clone| Reconciler
+    CR["WatchedRepo\n(custom resource)"] -.->|watched by| Reconciler
+
+    subgraph Manager["cmd/manager"]
+        Reconciler["WatchedRepo\nReconciler"]
+        Dashboard["Web dashboard\n:8090"]
+    end
+
+    Reconciler -->|check, and optionally\nauto-remediate| Cluster[("Target cluster\n(same or remote)")]
+    Reconciler -->|writes| Status[".status"]
+    Status --> Dashboard
+    Reconciler -->|on transition| Telegram(["Telegram alert"])
+```
+
+## Why this project
+
+Built as a portfolio piece to demonstrate real Kubernetes depth for
+DevOps roles — specifically the controller/CRD/reconcile-loop pattern
+that Kubernetes itself is built out of, rather than just `kubectl`
+usage. It was built and tested end-to-end against a real k3s cluster,
+which surfaced (and fixed) several genuine bugs a code read-through
+alone wouldn't have caught — a self-triggering reconcile loop, a
+false-positive drift bug on list fields, and a notification gap around
+auto-remediation. See the project's git history for the full story.
 
 ## Prerequisites
 

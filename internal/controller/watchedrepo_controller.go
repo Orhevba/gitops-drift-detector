@@ -21,9 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	driftv1alpha1 "github.com/tygacookie/gitops-drift-detector/api/v1alpha1"
-	"github.com/tygacookie/gitops-drift-detector/internal/drift"
-	"github.com/tygacookie/gitops-drift-detector/internal/notify"
+	driftv1alpha1 "github.com/Orhevba/gitops-drift-detector/api/v1alpha1"
+	"github.com/Orhevba/gitops-drift-detector/internal/drift"
+	"github.com/Orhevba/gitops-drift-detector/internal/notify"
 )
 
 const defaultPollInterval = 5 * time.Minute

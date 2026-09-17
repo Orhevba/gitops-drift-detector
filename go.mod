@@ -1,4 +1,4 @@
-module github.com/tygacookie/gitops-drift-detector
+module github.com/Orhevba/gitops-drift-detector
 
 go 1.22.0
 

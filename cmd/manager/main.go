@@ -17,10 +17,10 @@ import (
 	ctrlmanager "sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	driftv1alpha1 "github.com/tygacookie/gitops-drift-detector/api/v1alpha1"
-	"github.com/tygacookie/gitops-drift-detector/internal/controller"
-	"github.com/tygacookie/gitops-drift-detector/internal/dashboard"
-	"github.com/tygacookie/gitops-drift-detector/internal/notify"
+	driftv1alpha1 "github.com/Orhevba/gitops-drift-detector/api/v1alpha1"
+	"github.com/Orhevba/gitops-drift-detector/internal/controller"
+	"github.com/Orhevba/gitops-drift-detector/internal/dashboard"
+	"github.com/Orhevba/gitops-drift-detector/internal/notify"
 )
 
 func main() {

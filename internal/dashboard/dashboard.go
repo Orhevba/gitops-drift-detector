@@ -9,7 +9,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	driftv1alpha1 "github.com/tygacookie/gitops-drift-detector/api/v1alpha1"
+	driftv1alpha1 "github.com/Orhevba/gitops-drift-detector/api/v1alpha1"
 )
 
 // NewHandler returns an http.Handler that lists WatchedRepo resources via c.
