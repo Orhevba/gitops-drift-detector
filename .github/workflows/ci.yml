@@ -3,10 +3,12 @@ name: CI
 # Uses reusable workflows from ci-pipeline-kit instead of inlining the
 # steps here — see https://github.com/Orhevba/ci-pipeline-kit. This also
 # adds a security-scan stage (gosec + govulncheck) this project didn't
-# have before; go-version is pinned to 1.23 explicitly (rather than
-# trusting whatever ci-pipeline-kit's own default happens to be) since
-# that's the version known to be patched against GO-2025-3750, a real
-# stdlib vulnerability found while building that kit.
+# have before. Deliberately NOT overriding go-version here — the kit
+# defaults it to "stable" precisely so callers like this one don't need
+# to track and re-pin a version number themselves (an earlier attempt at
+# pinning "1.23" here went stale within the same session: it fixed one
+# stdlib CVE but a dozen more surfaced the moment security-scan actually
+# ran against this project's real dependency tree).
 
 on:
   push:
@@ -16,15 +18,9 @@ on:
 jobs:
   lint:
     uses: Orhevba/ci-pipeline-kit/.github/workflows/go-lint.yml@master
-    with:
-      go-version: "1.23"
 
   test:
     uses: Orhevba/ci-pipeline-kit/.github/workflows/go-test.yml@master
-    with:
-      go-version: "1.23"
 
   security-scan:
     uses: Orhevba/ci-pipeline-kit/.github/workflows/go-security-scan.yml@master
-    with:
-      go-version: "1.23"

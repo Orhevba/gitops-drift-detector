@@ -316,8 +316,11 @@ instead of only trusting unit tests — see the bugs section in the git
 history (and `~/Documents/gitops-drift-detector-journey.md`, if you have
 it) for what that caught that tests alone wouldn't have.
 
-CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go vet`, `go build`,
-and this test suite on every push/PR.
+CI (`.github/workflows/ci.yml`) runs lint (`gofmt`/`go vet`), this test
+suite, and a security scan (`gosec` + `govulncheck`) on every push/PR —
+via reusable workflows from
+[`ci-pipeline-kit`](https://github.com/Orhevba/ci-pipeline-kit) rather
+than inlined here.
 
 ## Roadmap
 
