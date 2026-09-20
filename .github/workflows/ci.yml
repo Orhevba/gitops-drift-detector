@@ -24,3 +24,16 @@ jobs:
 
   security-scan:
     uses: Orhevba/ci-pipeline-kit/.github/workflows/go-security-scan.yml@master
+
+  # Only from master, and only once lint, tests and the security scan all passed.
+  # Image: ghcr.io/orhevba/gitops-drift-detector (:<commit sha> and :latest).
+  publish:
+    needs: [lint, test, security-scan]
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+    uses: Orhevba/ci-pipeline-kit/.github/workflows/docker-build-push.yml@master
+    with:
+      image-name: gitops-drift-detector
+      push: true

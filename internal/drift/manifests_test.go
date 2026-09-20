@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -158,5 +159,14 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write %s: %v", path, err)
+	}
+}
+
+func TestOrphanScanApplies_OnlyToNamespacedKinds(t *testing.T) {
+	if !orphanScanApplies(meta.RESTScopeNamespace) {
+		t.Error("namespaced kinds (Deployment, Service...) must be scanned for orphans")
+	}
+	if orphanScanApplies(meta.RESTScopeRoot) {
+		t.Error("cluster-scoped kinds (Namespace...) must not be: every other namespace would look like an orphan")
 	}
 }

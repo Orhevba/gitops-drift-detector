@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,7 +61,12 @@ func (r *WatchedRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.recordError(ctx, &wr, interval, fmt.Errorf("resolving target cluster failed: %w", err))
 	}
 
-	dir, cleanup, err := cloneRepo(wr.Spec.RepoURL, wr.Spec.Branch)
+	token, err := r.gitTokenFor(ctx, &wr)
+	if err != nil {
+		return r.recordError(ctx, &wr, interval, err)
+	}
+
+	dir, cleanup, err := cloneRepo(wr.Spec.RepoURL, wr.Spec.Branch, token)
 	if err != nil {
 		return r.recordError(ctx, &wr, interval, fmt.Errorf("git clone failed: %w", err))
 	}
@@ -199,6 +205,34 @@ func (r *WatchedRepoReconciler) restConfigFor(ctx context.Context, wr *driftv1al
 	return cfg, nil
 }
 
+// gitTokenFor returns the access token for wr's private repo, or "" for a
+// public one (no gitCredentialsSecretRef). The token is never logged.
+func (r *WatchedRepoReconciler) gitTokenFor(ctx context.Context, wr *driftv1alpha1.WatchedRepo) (string, error) {
+	ref := wr.Spec.GitCredentialsSecretRef
+	if ref == nil {
+		return "", nil
+	}
+
+	key := ref.Key
+	if key == "" {
+		key = "token"
+	}
+
+	var secret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: wr.Namespace, Name: ref.Name}, &secret); err != nil {
+		return "", fmt.Errorf("failed to get git credentials secret %q: %w", ref.Name, err)
+	}
+	data, ok := secret.Data[key]
+	if !ok {
+		return "", fmt.Errorf("git credentials secret %q has no key %q", ref.Name, key)
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("git credentials secret %q key %q is empty", ref.Name, key)
+	}
+	return token, nil
+}
+
 func (r *WatchedRepoReconciler) recordError(ctx context.Context, wr *driftv1alpha1.WatchedRepo, interval time.Duration, checkErr error) (ctrl.Result, error) {
 	wr.Status.LastChecked = metav1.Now()
 	wr.Status.Error = checkErr.Error()
@@ -221,11 +255,55 @@ func (r *WatchedRepoReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// cloneRepo shallow-clones repoURL (optionally at branch) into a temp
-// directory and returns it along with a cleanup function to remove it.
-// cleanup returns an error rather than swallowing it, so callers can at
-// least log a failed cleanup instead of it vanishing silently.
-func cloneRepo(repoURL, branch string) (string, func() error, error) {
+// gitAuthEnv builds the extra environment that lets git authenticate to
+// repoURL with token. The token travels only in the environment (visible to
+// nothing but this git process), never on the command line or in the URL, and
+// the header is scoped to repoURL so git will not send it to any other host it
+// might be redirected to. Anything but https is refused: a token must not
+// cross the network in the clear.
+func gitAuthEnv(repoURL, token string) ([]string, error) {
+	if !strings.HasPrefix(repoURL, "https://") {
+		return nil, fmt.Errorf("gitCredentialsSecretRef needs an https:// repoURL (got %q): refusing to send a token any other way", repoURL)
+	}
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	return []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http." + repoURL + ".extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: Basic " + basic,
+	}, nil
+}
+
+// scrubToken removes the token (and its encoded forms) from git's output so an
+// error message that ends up in the WatchedRepo status can never contain it.
+func scrubToken(out, token string) string {
+	if token == "" {
+		return out
+	}
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	for _, secret := range []string{basic, token} {
+		out = strings.ReplaceAll(out, secret, "***")
+	}
+	return out
+}
+
+// cloneRepo shallow-clones repoURL (optionally at branch, optionally using
+// token for a private repo) into a temp directory and returns it along with a
+// cleanup function to remove it. cleanup returns an error rather than
+// swallowing it, so callers can at least log a failed cleanup instead of it
+// vanishing silently.
+func cloneRepo(repoURL, branch, token string) (string, func() error, error) {
+	// Never let git wait for a username/password on a terminal that doesn't
+	// exist: a private repo without credentials should fail fast, with a
+	// clear message, not hang the reconcile.
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if token != "" {
+		authEnv, err := gitAuthEnv(repoURL, token)
+		if err != nil {
+			return "", func() error { return nil }, err
+		}
+		env = append(env, authEnv...)
+	}
+
 	dir, err := os.MkdirTemp("", "watchedrepo-")
 	if err != nil {
 		return "", func() error { return nil }, err
@@ -239,12 +317,13 @@ func cloneRepo(repoURL, branch string) (string, func() error, error) {
 	args = append(args, repoURL, dir)
 
 	cmd := exec.Command("git", args...)
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// A failed clone means dir is empty anyway; the git-clone error
 		// is the one worth surfacing here, not a cleanup failure on it.
 		_ = cleanup()
-		return "", func() error { return nil }, fmt.Errorf("%s: %w", string(out), err)
+		return "", func() error { return nil }, fmt.Errorf("%s: %w", scrubToken(string(out), token), err)
 	}
 	return dir, cleanup, nil
 }

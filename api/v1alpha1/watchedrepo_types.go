@@ -42,6 +42,14 @@ type WatchedRepoSpec struct {
 	// +optional
 	PruneOrphans bool `json:"pruneOrphans,omitempty"`
 
+	// GitCredentialsSecretRef optionally points to a Secret (in this
+	// WatchedRepo's own namespace) holding an access token for a PRIVATE
+	// repo. The token is only ever handed to git through its environment
+	// (never the URL or command line), and is only sent to repoURL itself,
+	// which must then be https. Omit for public repos.
+	// +optional
+	GitCredentialsSecretRef *SecretKeyRef `json:"gitCredentialsSecretRef,omitempty"`
+
 	// KubeconfigSecretRef optionally points to a Secret (in this
 	// WatchedRepo's own namespace) containing a kubeconfig for a
 	// *different* cluster than the one the manager itself runs in. If
@@ -53,7 +61,8 @@ type WatchedRepoSpec struct {
 // SecretKeyRef references one key within a Secret in the same namespace.
 type SecretKeyRef struct {
 	Name string `json:"name"`
-	// Key defaults to "kubeconfig" if unset.
+	// Key defaults to "kubeconfig" for a kubeconfig reference and to
+	// "token" for a git credentials reference.
 	// +optional
 	Key string `json:"key,omitempty"`
 }
@@ -115,6 +124,10 @@ func (in *WatchedRepoSpec) DeepCopyInto(out *WatchedRepoSpec) {
 	if in.KubeconfigSecretRef != nil {
 		out.KubeconfigSecretRef = new(SecretKeyRef)
 		*out.KubeconfigSecretRef = *in.KubeconfigSecretRef
+	}
+	if in.GitCredentialsSecretRef != nil {
+		out.GitCredentialsSecretRef = new(SecretKeyRef)
+		*out.GitCredentialsSecretRef = *in.GitCredentialsSecretRef
 	}
 }
 

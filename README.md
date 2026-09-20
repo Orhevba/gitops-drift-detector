@@ -106,9 +106,12 @@ runs inside the cluster and reconciles `WatchedRepo` resources on a loop.
    kubectl apply -f config/rbac/rbac.yaml
    ```
 
-2. **Build the image.** On a single-node k3s VM with no registry, the
-   simplest path is building directly on that VM (copy the repo over, or
-   `git clone` it there):
+2. **Get the image.** CI publishes `ghcr.io/orhevba/gitops-drift-detector`
+   from every push to `master`, which is what `config/manager/deployment.yaml`
+   pulls (if the package is private, create an `imagePullSecret` named
+   `ghcr-pull-secret` first). To build it yourself instead, e.g. on a
+   single-node k3s VM with no registry, copy the repo over (or `git clone`
+   it there):
    ```sh
    docker build -t gitops-drift-detector:latest .
    ```
@@ -167,6 +170,13 @@ spec:
 `ConfigMap/kube-root-ca.crt` (which Kubernetes injects into every
 namespace automatically) is excluded by default, always, on top of
 whatever you add here.
+
+Orphan detection only looks at **namespaced** kinds. If your manifests
+include a `Namespace` (they often do, so the app is self-contained), it is
+checked like anything else for `MISSING`/`DRIFTED`, but the other namespaces
+in the cluster are *not* reported as orphans - the check is scoped to one
+namespace, and treating `kube-system` as "in the cluster but not in Git"
+(or pruning it) would be nonsense.
 
 ## Drift notifications (Telegram)
 
@@ -234,6 +244,33 @@ spec:
   result, e.g. hitting an immutable field) — but that only catches
   *detectable* problems, not every possible side effect of an automated
   write to your cluster.
+
+## Private repositories
+
+For a private GitHub repo, give the `WatchedRepo` a Secret holding an access
+token. Use a **fine-grained personal access token** limited to the repos you
+watch, with only **Contents: Read-only**:
+
+```yaml
+spec:
+  repoURL: https://github.com/you/private-app.git   # must be https
+  gitCredentialsSecretRef:
+    name: github-read-token
+    key: token   # optional, this is the default
+```
+
+```sh
+# type the token at the hidden prompt so it never lands in your shell history
+read -rsp "GitHub token: " T; echo
+kubectl create secret generic github-read-token -n drift-system --from-literal=token="$T"; unset T
+```
+
+How the token is handled: it is passed to `git` only through its environment
+(never in the URL or on the command line), the header is scoped to that one
+repo URL so git won't send it anywhere else, a plain `http://` URL is refused,
+and it is scrubbed from any error text that reaches the `WatchedRepo` status.
+A private repo with no (or a wrong) token fails fast with git's own message
+instead of waiting for a password prompt.
 
 ## Multi-cluster
 

@@ -160,7 +160,7 @@ func Check(ctx context.Context, cfg *rest.Config, manifestsDir, namespace string
 	// we never need a hardcoded list of "interesting" resource types.
 	for gvk, applied := range seenByKind {
 		mapping, err := c.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-		if err != nil {
+		if err != nil || !orphanScanApplies(mapping.Scope) {
 			continue
 		}
 		ri := resourceInterface(c.dyn, mapping, namespace)
@@ -315,7 +315,7 @@ func Remediate(ctx context.Context, cfg *rest.Config, manifestsDir, namespace st
 
 	for gvk, applied := range seenByKind {
 		mapping, err := c.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-		if err != nil {
+		if err != nil || !orphanScanApplies(mapping.Scope) {
 			continue
 		}
 		ri := resourceInterface(c.dyn, mapping, namespace)
@@ -338,6 +338,15 @@ func Remediate(ctx context.Context, cfg *rest.Config, manifestsDir, namespace st
 	}
 
 	return result, nil
+}
+
+// orphanScanApplies reports whether "in the cluster but not in Git" makes
+// sense for a kind. It only does for namespaced kinds, because the check is
+// scoped to one namespace: for a cluster-scoped kind such as Namespace the
+// list is the whole cluster, so every unrelated namespace (kube-system, other
+// apps...) would be reported as an orphan - and, with pruneOrphans, deleted.
+func orphanScanApplies(scope meta.RESTScope) bool {
+	return scope.Name() == meta.RESTScopeNameNamespace
 }
 
 func resourceInterface(dynClient dynamic.Interface, mapping *meta.RESTMapping, namespace string) dynamic.ResourceInterface {

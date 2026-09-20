@@ -19,14 +19,17 @@ spec:
         app: gitops-drift-detector
     spec:
       serviceAccountName: gitops-drift-detector
+      # Only needed while the GHCR package is private; harmless if it isn't.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
       containers:
         - name: manager
-          # Built from the repo's Dockerfile. On a single-node k3s VM with
-          # no registry, the simplest path is building the image directly
-          # on that VM (or importing a tarball via `k3s ctr images import`)
-          # rather than pushing/pulling through a registry.
-          image: gitops-drift-detector:latest
-          imagePullPolicy: IfNotPresent
+          # Published by CI (.github/workflows/ci.yml) to GHCR from every
+          # push to master. Building it yourself instead works too:
+          # `docker build -t gitops-drift-detector:latest .` on the node, then
+          # use that name with imagePullPolicy: IfNotPresent.
+          image: ghcr.io/orhevba/gitops-drift-detector:latest
+          imagePullPolicy: Always
           args:
             - --metrics-bind-address=:8080
             - --dashboard-bind-address=:8090
