@@ -1,4 +1,6 @@
-FROM golang:1.22 AS builder
+# Floating major tag on purpose: go.mod's `go` line moves whenever a dependency
+# bump needs a newer Go (a pinned 1.22 here broke the build once that happened).
+FROM golang:1 AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
