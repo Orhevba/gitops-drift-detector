@@ -170,3 +170,19 @@ func TestOrphanScanApplies_OnlyToNamespacedKinds(t *testing.T) {
 		t.Error("cluster-scoped kinds (Namespace...) must not be: every other namespace would look like an orphan")
 	}
 }
+
+func TestIgnoredOrphans_DefaultsPlusExtra(t *testing.T) {
+	ignored := ignoredOrphans([]string{" Deployment/my-release ", "", "  "})
+
+	// Both are created by Kubernetes in every namespace. ServiceAccount/default
+	// shows up as soon as the manifests declare any ServiceAccount, and must
+	// never be reported - or, with pruneOrphans, deleted.
+	for _, key := range []string{"ConfigMap/kube-root-ca.crt", "ServiceAccount/default", "Deployment/my-release"} {
+		if !ignored[key] {
+			t.Errorf("%s should be ignored", key)
+		}
+	}
+	if len(ignored) != 3 {
+		t.Errorf("blank entries must be skipped, got %v", ignored)
+	}
+}
