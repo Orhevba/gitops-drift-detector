@@ -28,7 +28,8 @@ jobs:
     # v0.49.0) can't load packages built by Go 1.27 ("export data version 5 is
     # greater than maximum supported version 4"), so it fails on every package
     # with 0 findings. Scan with go.mod's own version until gosec catches up,
-    # then drop this.
+    # then drop this. go.mod's `toolchain go1.26.9` line makes the runner's
+    # 1.26.8 switch to the patched 1.26.9 standard library.
     with:
       go-version: "1.26"
 
