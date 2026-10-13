@@ -66,9 +66,28 @@ func (r Result) HasDrift() bool {
 
 // defaultIgnoredOrphans lists resources Kubernetes itself injects into every
 // namespace. Nobody puts these in Git, so they'd otherwise show up as a
-// false-positive orphan on every single check.
+// false-positive orphan on every single check as soon as the manifests
+// declare one of their kinds - and, with pruneOrphans, be deleted on every
+// sync. ServiceAccount/default matters once an app ships its own
+// ServiceAccount: deleting it breaks every pod that runs as it.
 var defaultIgnoredOrphans = map[string]bool{
 	"ConfigMap/kube-root-ca.crt": true,
+	"ServiceAccount/default":     true,
+}
+
+// ignoredOrphans returns the "Kind/name" set excluded from orphan detection:
+// the built-in defaults plus extra (blank entries skipped).
+func ignoredOrphans(extra []string) map[string]bool {
+	ignored := map[string]bool{}
+	for k := range defaultIgnoredOrphans {
+		ignored[k] = true
+	}
+	for _, entry := range extra {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			ignored[entry] = true
+		}
+	}
+	return ignored
 }
 
 // Check compares the manifests in manifestsDir against live state in
@@ -78,16 +97,7 @@ var defaultIgnoredOrphans = map[string]bool{
 func Check(ctx context.Context, cfg *rest.Config, manifestsDir, namespace string, extraIgnore []string) (Result, error) {
 	var result Result
 
-	ignored := map[string]bool{}
-	for k := range defaultIgnoredOrphans {
-		ignored[k] = true
-	}
-	for _, entry := range extraIgnore {
-		entry = strings.TrimSpace(entry)
-		if entry != "" {
-			ignored[entry] = true
-		}
-	}
+	ignored := ignoredOrphans(extraIgnore)
 
 	desired, err := loadManifests(manifestsDir)
 	if err != nil {
@@ -238,15 +248,7 @@ type RemediateOptions struct {
 func Remediate(ctx context.Context, cfg *rest.Config, manifestsDir, namespace string, extraIgnore []string, opts RemediateOptions) (RemediationResult, error) {
 	var result RemediationResult
 
-	ignored := map[string]bool{}
-	for k := range defaultIgnoredOrphans {
-		ignored[k] = true
-	}
-	for _, entry := range extraIgnore {
-		if entry = strings.TrimSpace(entry); entry != "" {
-			ignored[entry] = true
-		}
-	}
+	ignored := ignoredOrphans(extraIgnore)
 
 	desired, err := loadManifests(manifestsDir)
 	if err != nil {

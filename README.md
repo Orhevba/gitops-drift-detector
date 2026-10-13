@@ -83,8 +83,9 @@ Point `-manifests` at your own repo of YAML files once you've verified it
 works against the bundled example. Use `-kubeconfig` to target a specific
 kubeconfig file if it's not in the default location or `$KUBECONFIG`.
 
-Cluster-injected resources (e.g. `ConfigMap/kube-root-ca.crt`, which
-Kubernetes adds to every namespace itself) are excluded from orphan
+Cluster-injected resources (`ConfigMap/kube-root-ca.crt` and
+`ServiceAccount/default`, which Kubernetes adds to every namespace itself)
+are excluded from orphan
 detection by default. Add your own exceptions with `-ignore`:
 
 ```sh
@@ -167,9 +168,9 @@ spec:
     - ConfigMap/some-cache
 ```
 
-`ConfigMap/kube-root-ca.crt` (which Kubernetes injects into every
-namespace automatically) is excluded by default, always, on top of
-whatever you add here.
+`ConfigMap/kube-root-ca.crt` and `ServiceAccount/default` (which
+Kubernetes injects into every namespace automatically) are excluded by
+default, always, on top of whatever you add here.
 
 Orphan detection only looks at **namespaced** kinds. If your manifests
 include a `Namespace` (they often do, so the app is self-contained), it is
